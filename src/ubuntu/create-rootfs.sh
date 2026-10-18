@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export LC_ALL=C
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 [[ $EUID == 0 ]] || exit 1
 rootfs="$PWD/work/rootfs"
@@ -44,6 +45,7 @@ cp provision.sh "$rootfs/tmp/provision.sh"
 chroot "$rootfs" /usr/bin/env DEBIAN_FRONTEND=noninteractive /bin/bash /tmp/provision.sh
 cp -a ../base_rootfs/lib/modules "$rootfs/lib/"
 cp -a ../base_rootfs/lib/firmware "$rootfs/lib/"
+cp -a ../base_rootfs/etc/wifi "$rootfs/etc/"
 cp ../base_rootfs/etc/fstab "$rootfs/etc/fstab"
 cp ../base_rootfs/etc/fw_env.config "$rootfs/etc/fw_env.config"
 cp ../base_rootfs/etc/modules-load.d/modules.conf "$rootfs/etc/modules-load.d/sonicpad.conf"
@@ -64,6 +66,8 @@ mkdir -p "$rootfs/etc/ssh/sshd_config.d"
 printf 'PermitRootLogin no\nPasswordAuthentication yes\n' > "$rootfs/etc/ssh/sshd_config.d/sonicpad.conf"
 rm -f "$rootfs"/etc/ssh/ssh_host_* "$rootfs/etc/machine-id"
 touch "$rootfs/etc/machine-id"
+rm -f "$rootfs/var/lib/dbus/machine-id"
+ln -s /etc/machine-id "$rootfs/var/lib/dbus/machine-id"
 cat > "$rootfs/etc/systemd/system/ssh-host-keys.service" <<'EOF'
 [Unit]
 Description=Generate unique SSH host keys

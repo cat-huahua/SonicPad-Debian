@@ -44,6 +44,8 @@ Connect a data cable from the computer to the Pad's rear USB-A **CAM** port.
 USB-C at the computer is usable only if the cable/connection enumerates the
 device. Power the Pad off, hold its outermost recessed button, then power it
 on while holding that button. Its screen should stay black in burning mode.
+If a direct A-to-C cable produces no USB event, use the documented A-to-A cable
+with a USB-C host adapter, or a computer USB-A port.
 
 ```sh
 sudo ./src/ubuntu/check-device.sh

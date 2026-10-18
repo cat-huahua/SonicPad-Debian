@@ -1,5 +1,15 @@
 # Sonic Pad Ubuntu port
 
+Build validation on 2026-10-18: vendor packaging succeeded, firmware checksum
+verified, ext4 passed a read-only filesystem check, and the emulated ARM64
+rootfs passed package, service, identity and netplan checks. Image size:
+994,115,584 bytes; 265 installed packages. Hardware boot and flashing remain
+untested because no Sonic Pad USB device was detected.
+
+SHA256 of that local build:
+`7071458ba34d6f8b9a374d0a06768eefc6aa7c9e7e8a19e1e7cbf00cd42f517a`.
+The firmware is stored locally in the output directory, not uploaded to GitHub.
+
 Experimental Ubuntu 22.04.5 Base ARM64 (Jammy), updated from Ubuntu's signed
 repositories during the build. Retains the R818 bootloader, device tree, vendor
 Linux 4.9.191 kernel, modules and firmware from Jpe230/SonicPad-Debian.

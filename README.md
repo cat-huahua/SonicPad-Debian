@@ -1,3 +1,9 @@
+# Sonic Pad Ubuntu fork
+
+Experimental Ubuntu 22.04 ARM64 userspace using the SonicPad-Debian board
+support package. See [Ubuntu build and hardware validation](docs/ubuntu.md).
+Original Debian project documentation follows.
+
 <p align="center">
   <a href="https://github.com/Jpe230/SonicPad-Debian/" title="SonicPad Logo">
     <img src="https://github.com/Jpe230/SonicPad-Debian/assets/6202305/ce559b28-9835-4447-809d-594a5bb70847" width="200px" alt="SonicPad Logo"/>

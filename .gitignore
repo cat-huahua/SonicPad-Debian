@@ -4,3 +4,6 @@ src/temp/
 src/prebuilt_kernel/
 src/out/
 src/shelltrap.log
+src/ubuntu/work/
+src/ubuntu/cache/
+src/ubuntu/out/

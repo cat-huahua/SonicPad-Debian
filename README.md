@@ -2,6 +2,8 @@
 
 Experimental Ubuntu 22.04 ARM64 userspace using the SonicPad-Debian board
 support package. See [Ubuntu build and hardware validation](docs/ubuntu.md).
+[USB-stick installer and official/Ubuntu selector](docs/usb-install-and-dual-boot.md)
+are also available as an experimental alternative to FEL flashing.
 Original Debian project documentation follows.
 
 <p align="center">

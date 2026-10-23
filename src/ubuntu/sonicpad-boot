@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Switch only between slots recorded by the USB installer.
+set -Eeuo pipefail
+[[ $EUID == 0 ]] || { echo 'Run with sudo.' >&2; exit 1; }
+choice=${1:-status}
+ubuntu=$(fw_printenv -n sonicpad_ubuntu_slot)
+official=$(fw_printenv -n sonicpad_official_slot)
+case "$ubuntu:$official" in A:B|B:A) ;; *) echo 'No valid dual-boot slot map.' >&2; exit 1;; esac
+if [[ $choice == status ]]; then
+    printf 'Ubuntu: slot %s\nOfficial: slot %s\n' "$ubuntu" "$official"
+    fw_printenv boot_partition root_partition
+    exit 0
+fi
+case "$choice" in
+    official) slot=$official; version=1.0.6.54.20;;
+    ubuntu) slot=$ubuntu; version=1.0.6.54.21;;
+    *) echo 'Usage: sonicpad-boot status|official|ubuntu' >&2; exit 2;;
+esac
+boot="/dev/disk/by-partlabel/boot$slot"
+root="/dev/disk/by-partlabel/rootfs$slot"
+[[ -b $boot && -b $root ]] || { echo 'Required partitions are missing.' >&2; exit 1; }
+label=$(blkid -s LABEL -o value "$root" || true)
+if [[ $choice == ubuntu ]]; then
+    [[ $label == UBUNTUROOT ]] || { echo 'Ubuntu filesystem label mismatch.' >&2; exit 1; }
+else
+    [[ $(blkid -s TYPE -o value "$root") == squashfs ]] || { echo 'Official filesystem type mismatch.' >&2; exit 1; }
+fi
+# Validate readable redundant environment before making any changes.
+fw_printenv > /dev/null
+settings=$(mktemp)
+trap 'rm -f "$settings"' EXIT
+cat > "$settings" <<EOF
+boot_partition boot$slot
+root_partition rootfs$slot
+systemAB_next $slot
+swu_version $version
+swu_mode
+swu_next
+EOF
+fw_setenv -s "$settings"
+sync
+echo "Selected $choice. Rebooting."
+systemctl reboot

@@ -7,3 +7,4 @@ src/shelltrap.log
 src/ubuntu/work/
 src/ubuntu/cache/
 src/ubuntu/out/
+src/ubuntu/__pycache__/

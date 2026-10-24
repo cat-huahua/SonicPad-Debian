@@ -27,7 +27,8 @@ def main():
         '-keyout', str(key), '-out', str(cert), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     run('openssl', 'pkey', '-in', str(key), '-pubout', '-out', str(public))
     pairs = [(BASE / 'out/usb/t800-sonic_lcd-ab_1.0.6.54.21.swu', WORK / 'package', 'installer'),
-             (BASE / 'out/usb/RETURN-TO-UBUNTU/t800-sonic_lcd-ab_1.0.6.54.22.swu', WORK / 'return-package', 'return')]
+             (BASE / 'out/usb/RETURN-TO-UBUNTU/t800-sonic_lcd-ab_1.0.6.54.22.swu', WORK / 'return-package', 'return'),
+             (BASE / 'out/usb/POWER-CONTROLS-UPDATE/t800-sonic_lcd-ab_1.0.6.54.23.swu', WORK / 'power-package', 'power')]
     for archive, stage, name in pairs:
         with archive.open('rb') as f:
             run('cpio', '-it', '--only-verify-crc', '--quiet', stdin=f, stdout=subprocess.DEVNULL)

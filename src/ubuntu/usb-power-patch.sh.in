@@ -1,0 +1,82 @@
+#!/bin/sh
+# Patch only the inactive Ubuntu filesystem while official firmware is running.
+set -eu
+case "${1:-}" in postinst) exit 0;; preinst) ;; *) exit 1;; esac
+slot=${2:-}
+case "$slot" in A|B) ;; *) exit 1;; esac
+temporary=
+mounted=0
+cleanup() {
+    result=$?
+    trap - EXIT
+    if [ "$mounted" = 1 ]; then
+        sync
+        if ! umount "$temporary/root"; then
+            echo "Could not unmount $temporary/root; leaving it in place." >&2
+            # Never recursively remove a directory containing a mounted rootfs.
+            temporary=
+            result=1
+        fi
+    fi
+    [ -z "$temporary" ] || rm -rf "$temporary"
+    if [ "$result" -ne 0 ]; then
+        fw_setenv swu_mode '' || true
+        fw_setenv swu_next '' || true
+    fi
+    exit "$result"
+}
+trap cleanup EXIT
+fail() { echo "Power-control patch aborted: $*" >&2; exit 1; }
+ubuntu=$(fw_printenv -n sonicpad_ubuntu_slot)
+official=$(fw_printenv -n sonicpad_official_slot)
+case "$ubuntu:$official" in A:B|B:A) ;; *) fail 'Invalid slot map';; esac
+[ "$slot" = "$ubuntu" ] || fail 'Destination is not the installed Ubuntu slot'
+[ "$(fw_printenv -n boot_partition)" = "boot$official" ] || fail 'Run this update from official firmware'
+[ "$(fw_printenv -n root_partition)" = "rootfs$official" ] || fail 'Unexpected active rootfs'
+if [ -f /etc/os-release ] && grep -Eq '^ID="?ubuntu"?$' /etc/os-release; then
+    fail 'Ubuntu must not be running while its filesystem is patched'
+fi
+device=$(readlink -f "/dev/by-name/rootfs$ubuntu")
+case "$device" in /dev/mmcblk0p*) ;; *) fail 'Unexpected storage device';; esac
+[ -b "$device" ] || fail 'Ubuntu partition missing'
+[ "$(blkid -s LABEL -o value "$device")" = UBUNTUROOT ] || fail 'Ubuntu filesystem label mismatch'
+[ "$(blkid -s TYPE -o value "$device")" = ext4 ] || fail 'Expected ext4'
+if awk -v d="$device" '$1 == d {found=1} END {exit found ? 0 : 1}' /proc/mounts; then
+    fail 'Ubuntu partition is already mounted'
+fi
+usb=
+mounts=$(awk '$3 == "vfat" {print $2}' /proc/mounts)
+while IFS= read -r path; do
+    path=$(printf '%b' "$path")
+    if [ -f "$path/t800-sonic_lcd-ab_1.0.6.54.23.swu" ]; then
+        [ -z "$usb" ] || fail 'Multiple patch sticks found'
+        usb=$path
+    fi
+done <<EOF
+$mounts
+EOF
+[ -n "$usb" ] || fail 'Patch stick not found'
+command -v base64 >/dev/null || fail 'Base64 decoder unavailable'
+temporary=$(mktemp -d /tmp/sonicpad-power-XXXXXX)
+mkdir "$temporary/root"
+base64 -d > "$temporary/payload.tgz" <<'PAYLOAD'
+@@PAYLOAD@@
+PAYLOAD
+echo '@@PAYLOAD_SHA256@@  payload.tgz' > "$temporary/payload.sha256"
+(cd "$temporary"; sha256sum -c payload.sha256)
+mount -t ext4 -o rw "$device" "$temporary/root"
+mounted=1
+[ -f "$temporary/root/usr/local/sbin/sonicpad-menu.py" ] || fail 'Startup selector missing'
+backup="$usb/ubuntu-power-files-before-$(date +%Y%m%d-%H%M%S).tgz"
+tar -czf "$backup" -C "$temporary/root" usr/local/sbin/sonicpad-menu.py etc/systemd/system/sonicpad-menu.service
+sha256sum "$backup" > "$backup.sha256"
+tar -xzf "$temporary/payload.tgz" -C "$temporary/root"
+cat > "$temporary/files.sha256" <<'CHECKSUMS'
+@@FILE_CHECKSUMS@@
+CHECKSUMS
+(cd "$temporary/root"; sha256sum -c "$temporary/files.sha256")
+sync
+umount "$temporary/root"
+mounted=0
+echo 'Persistent Shutdown/Restart controls and graceful power-key handling installed.'
+echo 'No bootloader or filesystem image was replaced. Restarting into Ubuntu.'

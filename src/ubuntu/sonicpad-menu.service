@@ -1,13 +1,12 @@
 [Unit]
 Description=Ubuntu / official firmware startup selector
 After=local-fs.target systemd-modules-load.service
-Before=multi-user.target
 ConditionPathExists=/dev/fb0
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/usr/local/sbin/sonicpad-menu.py
-TimeoutStartSec=45
+TimeoutStopSec=5
 
 [Install]
 WantedBy=multi-user.target

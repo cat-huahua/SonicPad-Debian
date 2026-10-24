@@ -3,12 +3,14 @@
 import base64
 import datetime
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import struct
 import subprocess
+import tarfile
 from zoneinfo import ZoneInfo
 
 BASE = Path(__file__).resolve().parent
@@ -48,6 +50,9 @@ def main():
         shutil.copyfile(BASE / name, destination)
         destination.chmod(0o755)
     shutil.copyfile(BASE / 'sonicpad-menu.service', rootfs / 'etc/systemd/system/sonicpad-menu.service')
+    power_config = rootfs / 'etc/systemd/logind.conf.d'
+    power_config.mkdir(exist_ok=True)
+    shutil.copyfile(BASE / 'sonicpad-power.conf', power_config / 'sonicpad-power.conf')
     run('systemctl', f'--root={rootfs}', 'enable', 'sonicpad-menu.service')
     # Stock A/B layout has two boot-resource partitions; the original
     # single-rootfs project's hardcoded mmc partition numbers are not valid.
@@ -115,6 +120,7 @@ def main():
     write_config(path)
     (out / 'SHA256SUMS').write_text(f'{sha(path)}  {PACKAGE}\n{sha(out / "config.ini")}  config.ini\n')
     build_return_package(out)
+    build_power_patch(out)
     print(f'USB package built: {path}; {path.stat().st_size:,} bytes')
 
 
@@ -155,6 +161,58 @@ def build_return_package(out):
     (stage / 'cpio_item_md5').write_text(''.join(lines))
     files.append('cpio_item_md5')
     path = destination / 't800-sonic_lcd-ab_1.0.6.54.22.swu'
+    with path.open('wb') as f:
+        run('cpio', '-o', '-H', 'crc', '--quiet', input=('\n'.join(files) + '\n').encode(), cwd=stage, stdout=f)
+    write_config(path)
+    (destination / 'SHA256SUMS').write_text(f'{sha(path)}  {path.name}\n{sha(destination / "config.ini")}  config.ini\n')
+
+
+def build_power_patch(out):
+    destination = out / 'POWER-CONTROLS-UPDATE'
+    destination.mkdir(exist_ok=True)
+    stage = WORK / 'power-package'
+    stage.mkdir(exist_ok=True)
+    assets = {
+        'usr/local/sbin/sonicpad-menu.py': BASE / 'sonicpad-menu.py',
+        'etc/systemd/system/sonicpad-menu.service': BASE / 'sonicpad-menu.service',
+        'etc/systemd/logind.conf.d/sonicpad-power.conf': BASE / 'sonicpad-power.conf',
+    }
+    buffer = io.BytesIO()
+    checksums = []
+    with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+        for name, source in assets.items():
+            data = source.read_bytes()
+            entry = tarfile.TarInfo(name)
+            entry.size = len(data)
+            entry.mode = 0o755 if name.endswith('.py') else 0o644
+            archive.addfile(entry, io.BytesIO(data))
+            checksums.append(f'{hashlib.sha256(data).hexdigest()}  {name}')
+    payload = buffer.getvalue()
+    template = (BASE / 'usb-power-patch.sh.in').read_text()
+    script = template.replace('@@PAYLOAD@@', base64.encodebytes(payload).decode().rstrip())
+    script = script.replace('@@PAYLOAD_SHA256@@', hashlib.sha256(payload).hexdigest())
+    script = script.replace('@@FILE_CHECKSUMS@@', '\n'.join(checksums))
+    (stage / 'power-patch.sh').write_text(script)
+    run('sh', '-n', str(stage / 'power-patch.sh'))
+    sections = []
+    for current, dest in [('A', 'B'), ('B', 'A')]:
+        env = {'swu_mode': '', 'boot_partition': f'boot{dest}', 'root_partition': f'rootfs{dest}',
+               'systemAB_next': dest, 'swu_version': '1.0.6.54.23', 'swu_next': 'reboot'}
+        bootenv = ',\n'.join('{ name = ' + json.dumps(k) + '; value = ' + json.dumps(v) + '; }' for k, v in env.items())
+        sections.append(f'''now_{current}_next_{dest} = {{
+            scripts: ({{filename = "power-patch.sh"; type = "shellscript";
+              data = "{dest}"; sha256 = "{sha(stage / 'power-patch.sh')}"; }});
+            bootenv: ({bootenv});
+        }};''')
+    (stage / 'sw-description').write_text('software = {\n version = "1.0.6.54.23";\n hardware-compatibility: ["1.0"];\n description = "Ubuntu graceful Shutdown/Restart controls";\n stable = {\n' + '\n'.join(sections) + '\n };\n};\n')
+    files = ['sw-description', 'power-patch.sh']
+    lines = []
+    for name in files:
+        with (stage / name).open('rb') as f:
+            lines.append(f'{hashlib.file_digest(f, "md5").hexdigest()}  {name}\n')
+    (stage / 'cpio_item_md5').write_text(''.join(lines))
+    files.append('cpio_item_md5')
+    path = destination / 't800-sonic_lcd-ab_1.0.6.54.23.swu'
     with path.open('wb') as f:
         run('cpio', '-o', '-H', 'crc', '--quiet', input=('\n'.join(files) + '\n').encode(), cwd=stage, stdout=f)
     write_config(path)

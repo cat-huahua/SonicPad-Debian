@@ -30,7 +30,7 @@ class Fixed(C.Structure):
     _fields_ += [('line_length', C.c_uint32), ('mmio_start', C.c_ulong), ('mmio_len', C.c_uint32), ('accel', C.c_uint32), ('capabilities', C.c_uint16), ('reserved', C.c_uint16 * 2)]
 
 
-def render(width, height, seconds, settings=False):
+def render(width, height, seconds, settings=False, runtime=False):
     image = Image.new('RGB', (width, height), '#101923')
     draw = ImageDraw.Draw(image)
     scale = min(width / 1024, height / 600)
@@ -39,18 +39,25 @@ def render(width, height, seconds, settings=False):
     def text(x, y, value, size=28, color='#e7eef7'):
         draw.text((int(x * width), int(y * height)), value, font=font(size), fill=color)
     text(.06, .07, 'Sonic Pad', 42)
-    text(.06, .18, 'Startup selector' if not settings else 'Boot information', 26, '#9bafc7')
+    subtitle = 'Boot information' if settings else ('Ubuntu 22.04 - system controls' if runtime else 'Startup selector')
+    text(.06, .18, subtitle, 26, '#9bafc7')
     boxes = []
-    labels = [('Ubuntu 22.04', 'Continue startup'), ('Official firmware', 'Switch slot and restart'), ('Boot information', 'U-Boot / recovery details')]
+    labels = [('Ubuntu 22.04', 'Continue startup', 'ubuntu'), ('Official firmware', 'Switch slot and restart', 'official'), ('Boot information', 'U-Boot / recovery details', 'info')]
+    if runtime:
+        text(.06, .28, 'Base system: use Ethernet and SSH as sonic. No desktop installed.', 21, '#a9bed4')
+        labels = [('Shut down', 'Stop services and unmount filesystems', 'shutdown'), ('Restart', 'Orderly system restart', 'reboot'), ('Official firmware', 'Switch slot and restart', 'official'), ('Boot information', 'U-Boot / recovery details', 'info')]
     if settings:
         text(.06, .33, 'Bootloader: existing Allwinner U-Boot', 25)
         text(.06, .43, 'UEFI / GRUB: not installed', 25)
         text(.06, .53, 'Official firmware keeps its original slot.', 23)
         text(.06, .63, 'Use the return USB update to start Ubuntu again.', 22)
-        labels = [('Continue Ubuntu', 'No bootloader changes')]
-    for i, (label, hint) in enumerate(labels):
+        labels = [('Continue Ubuntu', 'No bootloader changes', 'ubuntu')]
+    for i, (label, hint, action) in enumerate(labels):
         if settings:
-            x0, y0, x1, y1 = .06, .77, .94, .91
+            x0, y0, x1, y1 = .06, .77, .65, .91
+        elif runtime:
+            x0, y0 = .06 + (i % 2) * .45, .38 + (i // 2) * .24
+            x1, y1 = x0 + .42, y0 + .21
         else:
             x0, y0, x1, y1 = .06 + i * .30, .36, .34 + i * .30, .72
         box = tuple(int(v * (width if j % 2 == 0 else height)) for j, v in enumerate((x0, y0, x1, y1)))
@@ -66,19 +73,34 @@ def render(width, height, seconds, settings=False):
         lines.append(line)
         if not settings:
             for n, line in enumerate(lines):
-                text(x0 + .018, y0 + .15 + n * .045, line, 17, '#a9bed4')
-        boxes.append(box)
-    if not settings:
-        text(.06, .83, f'Ubuntu starts in {seconds}s  |  Touch, or press U / O / I on a USB keyboard', 20, '#a9bed4')
+                text(x0 + .018, y0 + (.115 if runtime else .15) + n * .04, line, 17, '#a9bed4')
+        boxes.append((box, action))
+    if not runtime:
+        power = (int(width * .69), int(height * (.77 if settings else .87)), int(width * .94), int(height * (.91 if settings else .97)))
+        draw.rounded_rectangle(power, radius=12, fill='#552a32', outline='#b96670', width=2)
+        draw.text((power[0] + int(width * .018), power[1] + int(height * .02)), 'Shut down', font=font(23), fill='#fff0f1')
+        boxes.append((power, 'shutdown'))
+    if not settings and not runtime:
+        text(.06, .79, f'Ubuntu starts in {seconds}s  |  U: Ubuntu  O: Official  I: Info  S: Shut down', 19, '#a9bed4')
+    if runtime:
+        text(.06, .91, 'Use Shut down before disconnecting power. Do not hold the power button.', 18, '#a9bed4')
     return image, boxes
+
+
+def request_power(action, runner=subprocess.run):
+    """Always ask systemd for an orderly stop; never force halt/poweroff."""
+    if action not in ('shutdown', 'reboot'):
+        raise ValueError('Unsupported power action')
+    runner(['systemctl', 'poweroff' if action == 'shutdown' else 'reboot'], check=True)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--preview', type=Path)
+    parser.add_argument('--screen', choices=('startup', 'runtime', 'info'), default='startup')
     args = parser.parse_args()
     if args.preview:
-        render(1024, 600, 10)[0].save(args.preview)
+        render(1024, 600, 10, settings=args.screen == 'info', runtime=args.screen == 'runtime')[0].save(args.preview)
         return
     import evdev
     fb = open('/dev/fb0', 'r+b', buffering=0)
@@ -108,7 +130,7 @@ def main():
                 devices.append(device)
         except OSError:
             continue
-    deadline, settings, last, boxes = time.monotonic() + 10, False, None, []
+    deadline, screen, last, boxes = time.monotonic() + 10, 'startup', None, []
     positions = {}
     def display(image):
         if pixel == 4:
@@ -119,23 +141,24 @@ def main():
             start = (var.yoffset + y) * fix.line_length + var.xoffset * pixel
             memory[start:start + stride] = raw[y * stride:(y + 1) * stride]
 
-    def continue_ubuntu():
+    def power_message(action):
         image = Image.new('RGB', (width, height), '#101923')
         draw = ImageDraw.Draw(image)
         font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', max(18, width // 34))
-        lines = ['Ubuntu 22.04 - startup continues', '', 'Base system: no desktop or printer UI installed.',
-                 'Connect Ethernet, then SSH as sonic.', 'Initial password: pad (change on first login).', '',
-                 'Restart the Pad to show the startup selector.']
+        lines = ['Requesting graceful shutdown' if action == 'shutdown' else 'Requesting an orderly restart', '',
+                 'Stopping services and unmounting filesystems.', 'Leave power connected while shutdown completes.']
         for i, line in enumerate(lines):
             draw.text((width // 18, height // 8 + i * height // 11), line, font=font, fill='#e7eef7')
         display(image)
 
-    while time.monotonic() < deadline:
-        seconds = max(0, int(deadline - time.monotonic()) + 1)
-        if (seconds, settings) != last:
-            image, boxes = render(width, height, seconds, settings)
+    while True:
+        if screen == 'startup' and time.monotonic() >= deadline:
+            screen = 'runtime'
+        seconds = max(0, int(deadline - time.monotonic()) + 1) if screen == 'startup' else 0
+        if (seconds, screen) != last:
+            image, boxes = render(width, height, seconds, settings=screen == 'info', runtime=screen == 'runtime')
             display(image)
-            last = (seconds, settings)
+            last = (seconds, screen)
         ready, _, _ = select.select(devices, [], [], .2)
         choice = None
         for device in ready:
@@ -150,22 +173,28 @@ def main():
                 release = event.type == E.EV_KEY and event.code == E.BTN_TOUCH and event.value == 0
                 release |= event.type == E.EV_ABS and event.code == E.ABS_MT_TRACKING_ID and event.value == -1
                 if release and 'x' in state and 'y' in state:
-                    for i, (x0, y0, x1, y1) in enumerate(boxes):
+                    for (x0, y0, x1, y1), action in boxes:
                         if x0 <= state['x'] <= x1 and y0 <= state['y'] <= y1:
-                            choice = i
+                            if choice != 'shutdown':
+                                choice = action
                 if event.type == E.EV_KEY and event.value == 1:
-                    choice = {E.KEY_U: 0, E.KEY_ENTER: 0, E.KEY_O: 1, E.KEY_I: 2}.get(event.code, choice)
+                    if choice != 'shutdown':
+                        choice = {E.KEY_U: 'ubuntu', E.KEY_ENTER: 'ubuntu', E.KEY_O: 'official', E.KEY_I: 'info', E.KEY_S: 'shutdown', E.KEY_R: 'reboot', E.KEY_POWER: 'shutdown'}.get(event.code, choice)
         if choice is not None:
-            if settings or choice == 0:
-                continue_ubuntu()
+            if choice in ('shutdown', 'reboot'):
+                power_message(choice)
+                try:
+                    request_power(choice)
+                except subprocess.CalledProcessError as exc:
+                    print(f'Power request failed: {exc}', file=sys.stderr)
+                    screen, last = 'runtime', None
+                    continue
                 return
-            if choice == 1:
+            if choice == 'official':
                 subprocess.run(['/usr/local/sbin/sonicpad-boot', 'official'], check=True)
                 return
-            settings = True
-            deadline = time.monotonic() + 25
+            screen = 'info' if choice == 'info' else 'runtime'
             last = None
-    continue_ubuntu()
 
 
 if __name__ == '__main__':

@@ -40,6 +40,13 @@ evdev input coordinates, and a USB keyboard supports U / O / I. Hardware display
 and touch operation have not yet been tested. A display/input failure must not
 prevent Ubuntu from booting.
 
+The updated selector stays running after startup as a system-controls panel.
+Shutdown and Restart request `systemctl poweroff` and `systemctl reboot` without
+force options, allowing systemd to stop services and unmount writable filesystems.
+The explicit logind drop-in requests graceful poweroff for power-key events.
+The physical button still needs a hardware test; a long hold can trigger the
+PMIC's forced cutoff and must not be used as a normal shutdown method.
+
 Selecting Official verifies the saved slot map and switches the boot environment,
 then restarts into the preserved official slot. This selection persists. The
 menu does not run within official firmware. From an Ubuntu terminal the same
@@ -70,7 +77,26 @@ Connect Ethernet for DHCP and SSH as `sonic` with initial password `pad`, then
 change it when prompted. Root password login is disabled. Each device generates
 its own SSH host keys and machine identity. The stock account/password are not
 used by Ubuntu. After the menu Ubuntu leaves a static information screen; that
-screen does not confirm successful networking or completion of boot.
+screen was used by the initial build. The updated build keeps the system-controls
+panel active. Neither screen confirms successful networking or completion of boot.
+
+## Follow-up power-controls update
+
+The initial installer copied to the stick preceded the persistent Shutdown/Restart
+controls. An update already running must be allowed to finish. The follow-up
+package is built locally in `out/usb/POWER-CONTROLS-UPDATE`, version 1.0.6.54.23;
+it cannot be added to a stick while that stick is connected to the Pad.
+
+Apply this package from the preserved official firmware, using its normal USB
+update prompt. It verifies the Ubuntu slot map and filesystem label, backs up
+the old menu files to the stick, mounts only the inactive Ubuntu filesystem,
+and updates the menu, its service and logind drop-in. No complete filesystem
+image, bootloader, or partition table is replaced. It then selects Ubuntu.
+The updater refuses to patch a running Ubuntu filesystem.
+
+The updated menu also handles `KEY_POWER` input events, but software cannot
+override a physical hard cutoff. Systemd's default power-key behavior was already
+graceful poweroff in the initial image; physical event delivery was unverified.
 
 ## Build and validation
 
@@ -105,6 +131,11 @@ rootfs package database and enabled services passed inspection. Menu rendering
 was checked with the target ARM64 Pillow version, and framebuffer structure
 sizes, button bounds and opaque pixel encoding were checked at 1024x600 and
 800x480. The installer archive is about 129 MiB.
+
+The power-controls follow-up also passed SWUpdate check mode for both slot
+directions, archive/config checks, and shell checks. Four non-hardware tests
+cover orderly command routing, invalid-action rejection, Shutdown availability
+on every screen, and refusing to remove a still-mounted rootfs on cleanup failure.
 
 Format references:
 
